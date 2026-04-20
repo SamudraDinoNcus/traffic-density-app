@@ -3,14 +3,33 @@ import cv2
 import numpy as np
 import pandas as pd
 import joblib
+import os
+import tempfile
+import time
 from ultralytics import YOLO
 from collections import deque, Counter
+
 
 # ==============================
 # LOAD MODEL
 # ==============================
-yolo_model = YOLO("yolov8n.pt")  # model deteksi
-model_ml = joblib.load("traffic_model.pkl")  # model klasifikasi
+@st.cache_resource
+def load_models():
+
+    BASE_DIR = os.path.dirname(__file__)
+    yolo_path = os.path.join(BASE_DIR, "yolov8n.pt")
+    ml_path = os.path.join(BASE_DIR, "traffic_model.pkl")
+    
+    yolo_model = YOLO(yolo_path)
+    model_ml = joblib.load(ml_path)
+    
+    return yolo_model, model_ml
+
+try:
+    yolo_model, model_ml = load_models()
+except Exception as e:
+    st.error(f"Gagal load model: {e}")
+    st.stop()
 
 # ==============================
 # PARAMETER
@@ -21,156 +40,172 @@ vehicle_classes = [2, 3, 5, 7]  # car, motor, bus, truck
 count_buffer = deque(maxlen=10)
 prediction_buffer = deque(maxlen=15)
 
-stable_label = None
 
 # ==============================
 # STREAMLIT UI
 # ==============================
-st.title("🚦 Traffic Density Detection (Stable Version)")
+st.title("🚦 Traffic Density Monitoring System")
+st.write("Deteksi kepadatan lalu lintas berbasis Computer Vision dan Machine Learning")
+
+if "stable_label" not in st.session_state:
+    st.session_state.stable_label = None
+
+st.info("Upload video untuk mulai deteksi")
 
 uploaded_file = st.file_uploader("Upload Video", type=["mp4", "avi"])
 
 if uploaded_file is not None:
-    # simpan sementara
-    with open("temp.mp4", "wb") as f:
-        f.write(uploaded_file.read())
+     
+     with st.spinner("Processing video..."):
 
-    cap = cv2.VideoCapture("temp.mp4")
+        # simpan file sementara (lebih aman)
+        tfile = tempfile.NamedTemporaryFile(delete=False)
+        tfile.write(uploaded_file.read())
+        tfile.close()
 
-    stframe = st.empty()
-    info_box = st.empty()
+        cap = cv2.VideoCapture(tfile.name)
 
-    frame_index = 0
+        if not cap.isOpened():
+            st.error("Gagal membuka video")
+            st.stop()
 
-    while cap.isOpened():
-        ret, frame = cap.read()
-        if not ret:
-            break
+        stframe = st.empty()
+        info_box = st.empty()
 
-        frame_index += 1
+        frame_index = 0
 
-        # skip frame biar ringan
-        if frame_index % 3 != 0:
-            continue
+        while cap.isOpened():
+            ret, frame = cap.read()
+            if not ret:
+                break
 
-        h, w = frame.shape[:2]
+            frame_index += 1
 
-        # ==============================
-        # ROI
-        # ==============================
-        roi_points = np.array([
-            [int(0.20 * w), int(0.25 * h)],
-            [int(0.85 * w), int(0.25 * h)],
-            [int(0.95 * w), int(0.95 * h)],
-            [int(0.05 * w), int(0.95 * h)]
-        ])
+            # skip frame biar ringan
+            if frame_index % 3 != 0:
+                continue
 
-        # ==============================
-        # DETEKSI YOLO
-        # ==============================
-        results = yolo_model(frame)[0]
+            h, w = frame.shape[:2]
 
-        count = 0
-        centroids = []
+            # ==============================
+            # ROI
+            # ==============================
+            roi_points = np.array([
+                [int(0.20 * w), int(0.25 * h)],
+                [int(0.85 * w), int(0.25 * h)],
+                [int(0.95 * w), int(0.95 * h)],
+                [int(0.05 * w), int(0.95 * h)]
+            ])
 
-        for box in results.boxes:
-            cls = int(box.cls[0])
+            # ==============================
+            # DETEKSI YOLO
+            # ==============================
+            results = yolo_model(frame)[0]
 
-            if cls in vehicle_classes:
-                x1, y1, x2, y2 = map(int, box.xyxy[0])
+            count = 0
+            centroids = []
 
-                points = [
-                    (x1, y1), (x2, y1),
-                    (x1, y2), (x2, y2)
-                ]
+            for box in results.boxes:
+                cls = int(box.cls[0])
 
-                inside = any(
-                    cv2.pointPolygonTest(roi_points, pt, False) >= 0
-                    for pt in points
-                )
+                if cls in vehicle_classes:
+                    x1, y1, x2, y2 = map(int, box.xyxy[0])
 
-                if inside:
-                    count += 1
+                    points = [
+                        (x1, y1), (x2, y1),
+                        (x1, y2), (x2, y2)
+                    ]
 
-                    cx = (x1 + x2) // 2
-                    cy = (y1 + y2) // 2
-                    centroids.append((cx, cy))
+                    inside = any(
+                        cv2.pointPolygonTest(roi_points, pt, False) >= 0
+                        for pt in points
+                    )
 
-                    # gambar bbox
-                    cv2.rectangle(frame, (x1, y1), (x2, y2), (0,255,0), 2)
+                    if inside:
+                        count += 1
 
-        # ==============================
-        # FEATURE ENGINEERING
-        # ==============================
-        count_buffer.append(count)
-        count_smooth = np.mean(count_buffer)
+                        cx = (x1 + x2) // 2
+                        cy = (y1 + y2) // 2
+                        centroids.append((cx, cy))
 
-        density = count / (w * h)
+                        # gambar bbox
+                        cv2.rectangle(frame, (x1, y1), (x2, y2), (0,255,0), 2)
 
-        if len(count_buffer) > 1:
-            delta = count_buffer[-1] - count_buffer[-2]
-        else:
-            delta = 0
+            # ==============================
+            # FEATURE ENGINEERING
+            # ==============================
+            count_buffer.append(count)
+            count_smooth = np.mean(count_buffer)
 
-        var = np.var(count_buffer)
+            density = count / (w * h)
 
-        flow = np.mean(np.abs(np.diff(count_buffer))) if len(count_buffer) > 1 else 0
-
-        features = pd.DataFrame([{
-            "count_smooth": count_smooth,
-            "density": density,
-            "delta": delta,
-            "var": var,
-            "flow": flow
-        }])
-
-        features = features[model_ml.feature_names_in_]
-
-        # ==============================
-        # PREDIKSI ML
-        # ==============================
-        pred = model_ml.predict(features)[0]
-
-        prediction_buffer.append(pred)
-
-        # ==============================
-        # ANTI FLICKER LOGIC
-        # ==============================
-        if len(prediction_buffer) == prediction_buffer.maxlen:
-            most_common = Counter(prediction_buffer).most_common(1)[0][0]
-
-            if stable_label is None:
-                stable_label = most_common
+            if len(count_buffer) > 1:
+                delta = count_buffer[-1] - count_buffer[-2]
             else:
-                if most_common != stable_label:
-                    change_count = list(prediction_buffer).count(most_common)
+                delta = 0
 
-                    if change_count > 10:  # threshold stabil
-                        stable_label = most_common
+            var = np.var(count_buffer)
 
-        # ==============================
-        # VISUALISASI
-        # ==============================
-        cv2.polylines(frame, [roi_points], True, (0,255,0), 2)
+            flow = np.mean(np.abs(np.diff(count_buffer))) if len(count_buffer) > 1 else 0
 
-        cv2.putText(frame, f"Count: {count}", (20,40),
-                    cv2.FONT_HERSHEY_SIMPLEX, 1, (0,255,0), 2)
+            features = pd.DataFrame([{
+                "count_smooth": count_smooth,
+                "density": density,
+                "delta": delta,
+                "var": var,
+                "flow": flow
+            }])
 
-        cv2.putText(frame, f"Density: {stable_label}", (20,80),
-                    cv2.FONT_HERSHEY_SIMPLEX, 1, (0,0,255), 2)
+            features = features[model_ml.feature_names_in_]
 
-        # tampilkan
-        frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-        stframe.image(frame_rgb)
+            # ==============================
+            # PREDIKSI ML
+            # ==============================
+            pred = model_ml.predict(features)[0]
 
-        # info tambahan
-        confidence = Counter(prediction_buffer).most_common(1)[0][1] / len(prediction_buffer) if len(prediction_buffer) > 0 else 0
+            prediction_buffer.append(pred)
 
-        info_box.write({
-            "Raw Count": count,
-            "Smoothed Count": round(count_smooth, 2),
-            "Prediction (stable)": stable_label,
-            "Confidence": round(confidence, 2)
-        })
+            # ==============================
+            # ANTI FLICKER LOGIC
+            # ==============================
+            if len(prediction_buffer) == prediction_buffer.maxlen:
+                most_common = Counter(prediction_buffer).most_common(1)[0][0]
 
-    cap.release()
+                if st.session_state.stable_label is None:
+                    st.session_state.stable_label = most_common
+                else:
+                    if most_common != st.session_state.stable_label:
+                        change_count = list(prediction_buffer).count(most_common)
+
+                        if change_count > 10:
+                            st.session_state.stable_label = most_common
+
+            # ==============================
+            # VISUALISASI
+            # ==============================
+            cv2.polylines(frame, [roi_points], True, (0,255,0), 2)
+
+            cv2.putText(frame, f"Count: {count}", (20,40),
+                        cv2.FONT_HERSHEY_SIMPLEX, 1, (0,255,0), 2)
+
+            cv2.putText(frame, f"Density: {st.session_state.stable_label}", (20,80),
+                        cv2.FONT_HERSHEY_SIMPLEX, 1, (0,0,255), 2)
+
+            # tampilkan
+            frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+            stframe.image(frame_rgb)
+
+            # info tambahan
+            confidence = Counter(prediction_buffer).most_common(1)[0][1] / len(prediction_buffer) if len(prediction_buffer) > 0 else 0
+
+            info_box.write({
+                "Raw Count": count,
+                "Smoothed Count": round(count_smooth, 2),
+                "Prediction (stable)": st.session_state.stable_label,
+                "Confidence": round(confidence, 2)
+            })
+
+            time.sleep(0.01)
+
+        cap.release()
+        os.remove(tfile.name)
