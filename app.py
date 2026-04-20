@@ -88,6 +88,7 @@ if uploaded_file is not None or use_sample:
         info_box = st.empty()
 
         frame_index = 0
+        max_frames = 300
 
         while cap.isOpened():
             ret, frame = cap.read()
@@ -124,7 +125,6 @@ if uploaded_file is not None or use_sample:
             # DETEKSI YOLO
             # ==============================
             last_results = None
-            max_frames = 300
 
             if frame_index % 14 == 0:   # dari 7 → 14 (lebih ringan)
                 last_results = yolo_model(frame)[0]
