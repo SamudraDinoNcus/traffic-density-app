@@ -17,8 +17,8 @@ from collections import deque, Counter
 def load_models():
 
     BASE_DIR = os.path.dirname(__file__)
-    yolo_path = os.path.join(BASE_DIR, "yolov8n.pt")
-    ml_path = os.path.join(BASE_DIR, "traffic_model.pkl")
+    yolo_path = os.path.join(BASE_DIR, "models/yolov8n.pt")
+    ml_path = os.path.join(BASE_DIR, "models/traffic_model.pkl")
     
     yolo_model = YOLO(yolo_path)
     model_ml = joblib.load(ml_path)
