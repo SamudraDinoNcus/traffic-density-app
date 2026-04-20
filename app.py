@@ -103,7 +103,7 @@ if uploaded_file is not None or use_sample:
             if total_frames > 0:
                 progress.progress(min(frame_index / total_frames, 1.0))
                 
-            frame = cv2.resize(frame, (480, 270))
+            frame = cv2.resize(frame, (416, 234))
 
             # skip frame biar ringan
             if frame_index % 7 != 0:
