@@ -78,7 +78,7 @@ if uploaded_file is not None or use_sample:
         cap = cv2.VideoCapture(video_path)
 
         progress = st.progress(0)
-        total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+        total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT)) or 1
 
         if not cap.isOpened():
             st.error("Gagal membuka video")
@@ -94,15 +94,18 @@ if uploaded_file is not None or use_sample:
             if not ret:
                 break
 
-            frame = cv2.resize(frame, (640, 360))
-
             frame_index += 1
+
+            if frame_index > max_frames:
+                break
 
             if total_frames > 0:
                 progress.progress(min(frame_index / total_frames, 1.0))
+                
+            frame = cv2.resize(frame, (480, 270))
 
             # skip frame biar ringan
-            if frame_index % 3 != 0:
+            if frame_index % 7 != 0:
                 continue
 
             h, w = frame.shape[:2]
@@ -120,7 +123,16 @@ if uploaded_file is not None or use_sample:
             # ==============================
             # DETEKSI YOLO
             # ==============================
-            results = yolo_model(frame)[0]
+            last_results = None
+            max_frames = 300
+
+            if frame_index % 14 == 0:   # dari 7 → 14 (lebih ringan)
+                last_results = yolo_model(frame)[0]
+
+            if last_results is None:
+                continue
+
+            results = last_results
 
             count = 0
             centroids = []
