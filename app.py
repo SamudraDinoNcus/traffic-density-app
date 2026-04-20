@@ -54,16 +54,31 @@ st.info("Upload video untuk mulai deteksi")
 
 uploaded_file = st.file_uploader("Upload Video", type=["mp4", "avi"])
 
-if uploaded_file is not None:
+st.markdown("### Atau coba sample video")
+use_sample = st.button("Gunakan contoh video")
+
+if uploaded_file is not None or use_sample:
+     
+     if uploaded_file is not None:
+        if uploaded_file.size > 50 * 1024 * 1024:
+            st.error("Video terlalu besar (max 50MB)")
+            st.stop()
      
      with st.spinner("Processing video..."):
 
         # simpan file sementara (lebih aman)
-        tfile = tempfile.NamedTemporaryFile(delete=False)
-        tfile.write(uploaded_file.read())
-        tfile.close()
+        if use_sample:
+            video_path = "sample.mp4"
+        else:
+            tfile = tempfile.NamedTemporaryFile(delete=False)
+            tfile.write(uploaded_file.read())
+            tfile.close()
+            video_path = tfile.name
 
-        cap = cv2.VideoCapture(tfile.name)
+        cap = cv2.VideoCapture(video_path)
+
+        progress = st.progress(0)
+        total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
 
         if not cap.isOpened():
             st.error("Gagal membuka video")
@@ -79,7 +94,12 @@ if uploaded_file is not None:
             if not ret:
                 break
 
+            frame = cv2.resize(frame, (640, 360))
+
             frame_index += 1
+
+            if total_frames > 0:
+                progress.progress(min(frame_index / total_frames, 1.0))
 
             # skip frame biar ringan
             if frame_index % 3 != 0:
@@ -208,4 +228,5 @@ if uploaded_file is not None:
             time.sleep(0.01)
 
         cap.release()
-        os.remove(tfile.name)
+        if not use_sample:
+            os.remove(tfile.name)
