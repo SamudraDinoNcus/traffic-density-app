@@ -67,5 +67,3 @@ This project aims to automatically analyze traffic density using video.
 
 ![Demo](assets/demo.gif)
 
-Note:
-Due to cloud limitations, YOLO inference is demonstrated locally.
