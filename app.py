@@ -6,7 +6,7 @@ import joblib
 import os
 import tempfile
 import time
-# from ultralytics import YOLO
+from ultralytics import YOLO
 from collections import deque, Counter
 
 
@@ -20,7 +20,7 @@ def load_models():
     yolo_path = os.path.join(BASE_DIR, "models/yolov8n.pt")
     ml_path = os.path.join(BASE_DIR, "models/traffic_model.pkl")
     
-#    yolo_model = YOLO(yolo_path)
+    yolo_model = YOLO(yolo_path)
     model_ml = joblib.load(ml_path)
     
     return yolo_model, model_ml
