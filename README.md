@@ -60,12 +60,10 @@ This project aims to automatically analyze traffic density using video.
 - GPU deployment
 - Real-time CCTV integration
 - Better detection model
-<<<<<<< HEAD
-=======
 
 ---
 
 ## 🎥 Demo
 
 ![Demo](assets/demo.gif)
->>>>>>> 40260aa (finalize portfolio structure)
+
