@@ -15,8 +15,8 @@ from collections import deque, Counter
 # ==============================
 @st.cache_resource
 def load_models():
-
     BASE_DIR = os.path.dirname(__file__)
+
     yolo_path = os.path.join(BASE_DIR, "models/yolov8n.pt")
     ml_path = os.path.join(BASE_DIR, "models/traffic_model.pkl")
     
@@ -31,18 +31,18 @@ except Exception as e:
     st.error(f"Gagal load model: {e}")
     st.stop()
 
+
 # ==============================
 # PARAMETER
 # ==============================
-vehicle_classes = [2, 3, 5, 7]  # car, motor, bus, truck
+vehicle_classes = [2, 3, 5, 7]
 
-# smoothing
 count_buffer = deque(maxlen=10)
 prediction_buffer = deque(maxlen=15)
 
 
 # ==============================
-# STREAMLIT UI
+# UI
 # ==============================
 st.title("🚦 Traffic Density Monitoring System")
 st.write("Deteksi kepadatan lalu lintas berbasis Computer Vision dan Machine Learning")
@@ -53,20 +53,18 @@ if "stable_label" not in st.session_state:
 st.info("Upload video untuk mulai deteksi")
 
 uploaded_file = st.file_uploader("Upload Video", type=["mp4", "avi"])
-
-st.markdown("### Atau coba sample video")
 use_sample = st.button("Gunakan contoh video")
 
+
 if uploaded_file is not None or use_sample:
-     
-     if uploaded_file is not None:
+
+    if uploaded_file is not None:
         if uploaded_file.size > 50 * 1024 * 1024:
             st.error("Video terlalu besar (max 50MB)")
             st.stop()
-     
-     with st.spinner("Processing video..."):
 
-        # simpan file sementara (lebih aman)
+    with st.spinner("Processing video..."):
+
         if use_sample:
             video_path = "sample.mp4"
         else:
@@ -77,18 +75,20 @@ if uploaded_file is not None or use_sample:
 
         cap = cv2.VideoCapture(video_path)
 
-        progress = st.progress(0)
-        total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT)) or 1
-
         if not cap.isOpened():
             st.error("Gagal membuka video")
             st.stop()
+
+        progress = st.progress(0)
+        total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT)) or 1
 
         stframe = st.empty()
         info_box = st.empty()
 
         frame_index = 0
-        max_frames = 300
+        max_frames = 30000
+
+        last_results = None
 
         while cap.isOpened():
             ret, frame = cap.read()
@@ -96,16 +96,14 @@ if uploaded_file is not None or use_sample:
                 break
 
             frame_index += 1
-
             if frame_index > max_frames:
                 break
 
             if total_frames > 0:
                 progress.progress(min(frame_index / total_frames, 1.0))
-                
+
             frame = cv2.resize(frame, (416, 234))
 
-            # skip frame biar ringan
             if frame_index % 7 != 0:
                 continue
 
@@ -121,21 +119,17 @@ if uploaded_file is not None or use_sample:
                 [int(0.05 * w), int(0.95 * h)]
             ])
 
-            # ==============================
-            # DETEKSI YOLO
-            # ==============================
-            last_results = None
+            roi_area = cv2.contourArea(roi_points)
 
-            if frame_index % 14 == 0:   # dari 7 → 14 (lebih ringan)
+            # ==============================
+            # YOLO (FIX: tidak kosong)
+            # ==============================
+            if frame_index % 14 == 0 or last_results is None:
                 last_results = yolo_model(frame)[0]
-
-            if last_results is None:
-                continue
 
             results = last_results
 
             count = 0
-            centroids = []
 
             for box in results.boxes:
                 cls = int(box.cls[0])
@@ -143,10 +137,7 @@ if uploaded_file is not None or use_sample:
                 if cls in vehicle_classes:
                     x1, y1, x2, y2 = map(int, box.xyxy[0])
 
-                    points = [
-                        (x1, y1), (x2, y1),
-                        (x1, y2), (x2, y2)
-                    ]
+                    points = [(x1,y1),(x2,y1),(x1,y2),(x2,y2)]
 
                     inside = any(
                         cv2.pointPolygonTest(roi_points, pt, False) >= 0
@@ -155,30 +146,24 @@ if uploaded_file is not None or use_sample:
 
                     if inside:
                         count += 1
-
-                        cx = (x1 + x2) // 2
-                        cy = (y1 + y2) // 2
-                        centroids.append((cx, cy))
-
-                        # gambar bbox
-                        cv2.rectangle(frame, (x1, y1), (x2, y2), (0,255,0), 2)
+                        cv2.rectangle(frame, (x1,y1),(x2,y2),(0,255,0),2)
 
             # ==============================
             # FEATURE ENGINEERING
             # ==============================
             count_buffer.append(count)
+
+            if len(count_buffer) < 3:
+                continue
+
             count_smooth = np.mean(count_buffer)
 
-            density = count / (w * h)
+            density = count / roi_area if roi_area > 0 else 0
+            density = min(density, 1)
 
-            if len(count_buffer) > 1:
-                delta = count_buffer[-1] - count_buffer[-2]
-            else:
-                delta = 0
-
+            delta = count_buffer[-1] - count_buffer[-2]
             var = np.var(count_buffer)
-
-            flow = np.mean(np.abs(np.diff(count_buffer))) if len(count_buffer) > 1 else 0
+            flow = np.mean(np.abs(np.diff(count_buffer)))
 
             features = pd.DataFrame([{
                 "count_smooth": count_smooth,
@@ -194,11 +179,10 @@ if uploaded_file is not None or use_sample:
             # PREDIKSI ML
             # ==============================
             pred = model_ml.predict(features)[0]
-
             prediction_buffer.append(pred)
 
             # ==============================
-            # ANTI FLICKER LOGIC
+            # STABILISASI
             # ==============================
             if len(prediction_buffer) == prediction_buffer.maxlen:
                 most_common = Counter(prediction_buffer).most_common(1)[0][0]
@@ -208,12 +192,11 @@ if uploaded_file is not None or use_sample:
                 else:
                     if most_common != st.session_state.stable_label:
                         change_count = list(prediction_buffer).count(most_common)
-
                         if change_count > 10:
                             st.session_state.stable_label = most_common
 
             # ==============================
-            # VISUALISASI
+            # VISUAL
             # ==============================
             cv2.polylines(frame, [roi_points], True, (0,255,0), 2)
 
@@ -223,12 +206,10 @@ if uploaded_file is not None or use_sample:
             cv2.putText(frame, f"Density: {st.session_state.stable_label}", (20,80),
                         cv2.FONT_HERSHEY_SIMPLEX, 1, (0,0,255), 2)
 
-            # tampilkan
             frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
             stframe.image(frame_rgb)
 
-            # info tambahan
-            confidence = Counter(prediction_buffer).most_common(1)[0][1] / len(prediction_buffer) if len(prediction_buffer) > 0 else 0
+            confidence = Counter(prediction_buffer).most_common(1)[0][1] / len(prediction_buffer)
 
             info_box.write({
                 "Raw Count": count,
@@ -240,5 +221,6 @@ if uploaded_file is not None or use_sample:
             time.sleep(0.01)
 
         cap.release()
+
         if not use_sample:
             os.remove(tfile.name)
