@@ -2,8 +2,7 @@ streamlit
 numpy
 pandas
 Pillow
-opencv-python-headless
+opencv-python-headless==4.8.1.78
 ultralytics
 torch==2.11.0
 torchvision==0.26.0
-joblib
