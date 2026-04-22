@@ -1,7 +1,9 @@
 streamlit
-opencv-python-headless
 numpy
 pandas
-joblib
+Pillow
+opencv-python-headless
 ultralytics
-scikit-learn
+torch==2.2.0
+torchvision==0.17.0
+joblib
