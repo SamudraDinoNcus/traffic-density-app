@@ -125,6 +125,10 @@ This project highlights real-world ML engineering problems:
 - Dataset size: XXX samples
 - Evaluation method: train/test split or cross-validation
 
+## Demo Video
+<img width="800" height="450" alt="demo" src="https://github.com/user-attachments/assets/10179b0e-ad21-404b-97f9-7d6cce5b02f0" />
+
+
 ---
 
 ## ▶️ How to Run Locally
